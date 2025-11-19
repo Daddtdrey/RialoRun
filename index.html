@@ -1,9 +1,8 @@
 <!DOCTYPE html>
-
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Rialo Run: The Direct Link</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@800&display=swap');
@@ -15,6 +14,9 @@
             overflow: hidden; 
             font-family: 'JetBrains Mono', monospace; 
             touch-action: none; /* Critical for mobile */
+            -webkit-touch-callout: none; /* iOS Safari disable callout */
+            -webkit-user-select: none;   /* iOS Safari disable text select */
+            user-select: none;
         }
         canvas { display: block; }
         
@@ -27,26 +29,27 @@
             text-align: center;
             color: white;
             display: none; /* Hidden by default */
-            z-index: 10;
+            z-index: 100; /* High Z-Index to sit on top */
             background: rgba(5, 5, 16, 0.95);
-            padding: 2.5rem;
+            padding: 2rem;
             border: 2px solid #F5F5DC; /* Cream Border */
             border-radius: 16px;
             box-shadow: 0 0 60px rgba(245, 245, 220, 0.3);
-            min-width: 300px;
+            width: 80%;
+            max-width: 400px;
         }
         h1 { 
-            font-size: 32px; 
+            font-size: 28px; 
             margin: 0 0 15px 0; 
             color: #ff4b4b; /* Red for Danger/Error */
             text-transform: uppercase;
             letter-spacing: -1px;
             text-shadow: 0 0 10px rgba(255, 75, 75, 0.5);
         }
-        p { font-size: 16px; color: #a0a0b0; margin-bottom: 10px; line-height: 1.5; }
+        p { font-size: 14px; color: #a0a0b0; margin-bottom: 10px; line-height: 1.5; }
         
         .score-big {
-            font-size: 40px;
+            font-size: 36px;
             color: #F5F5DC; /* Cream Score Text */
             display: block;
             margin: 10px 0 20px 0;
@@ -57,27 +60,30 @@
             background: #F5F5DC; /* Cream Button */
             color: #000;
             border: none;
-            padding: 12px 30px;
+            padding: 15px 30px; /* Larger touch target */
             font-family: inherit;
             font-weight: 900;
             font-size: 18px;
             cursor: pointer;
             text-transform: uppercase;
-            border-radius: 4px;
+            border-radius: 8px;
             transition: transform 0.1s;
+            box-shadow: 0 4px 0 #d4d4b0; /* 3D effect */
+            touch-action: manipulation; /* Enable touch */
         }
-        button:hover { background: #fff; transform: scale(1.05); }
+        button:active { transform: translateY(4px); box-shadow: none; }
 
         #start-hint {
             position: absolute;
-            bottom: 15%;
+            bottom: 20%;
             width: 100%;
             text-align: center;
             color: #F5F5DC;
-            font-size: 14px;
+            font-size: 16px;
             opacity: 0.7;
             pointer-events: none;
             animation: float 2s infinite ease-in-out;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
         }
         @keyframes float {
             0%, 100% { transform: translateY(0); }
@@ -93,10 +99,11 @@
         <p id="death-reason">System Failure</p>
         <p>Rialo Points Collected:</p>
         <span id="final-score" class="score-big">0</span>
-        <button onclick="resetGame()">Reboot Protocol</button>
+        <!-- Added ID to button for easier targeting -->
+        <button id="reboot-btn" onclick="resetGame()">Reboot Protocol</button>
     </div>
 
-    <div id="start-hint">TAP SCREEN or PRESS SPACE to JUMP</div>
+    <div id="start-hint">TAP SCREEN to JUMP</div>
 
     <!-- The Game Stage -->
     <canvas id="gameCanvas"></canvas>
@@ -116,13 +123,11 @@
         window.addEventListener('resize', resize);
         resize();
 
-        // --- ASSETS: THE CREAM & BLACK LOGO ---
-        // Background: #F5F5DC (Cream)
-        // Letter R: #000000 (Black)
+        // --- ASSETS ---
         const logoImg = new Image();
         logoImg.src = "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='100' fill='%23F5F5DC'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='sans-serif' font-weight='900' font-size='350' fill='%23000000'%3ER%3C/text%3E%3C/svg%3E";
 
-        // --- CONFIG: THE VILLAINS ---
+        // --- CONFIG ---
         const PROBLEMS = [
             { label: "ORACLE LAG", icon: "⏳" },
             { label: "BRIDGE HACK", icon: "🌉" },
@@ -145,7 +150,7 @@
             width: 50, 
             height: 50,
             velocity_y: 0, 
-            color: '#F5F5DC', // Cream fallback color
+            color: '#F5F5DC', 
             isGrounded: false
         };
 
@@ -156,7 +161,7 @@
         const JUMP_FORCE = -16; 
         const GROUND_HEIGHT = 100;
 
-        // --- CONTROLS ---
+        // --- CONTROLS (FIXED FOR MOBILE BUTTONS) ---
         function jump() {
             if (isGameOver) return;
             document.getElementById('start-hint').style.display = 'none';
@@ -164,7 +169,6 @@
             if (player.isGrounded) {
                 player.velocity_y = JUMP_FORCE;
                 player.isGrounded = false;
-                // Spawn Cream-colored dust
                 spawnParticles(player.x + player.width/2, player.y + player.height, '#F5F5DC', 5);
             }
         }
@@ -172,7 +176,16 @@
         window.addEventListener('keydown', e => {
             if (e.code === 'Space' || e.code === 'ArrowUp') jump();
         });
+
+        // --- MOBILE TOUCH FIX ---
         window.addEventListener('touchstart', e => {
+            // CRITICAL FIX: Check if the user touched the Button.
+            // If they touched the button (or anything inside the UI), DO NOT JUMP.
+            if (e.target.tagName === 'BUTTON' || e.target.closest('#ui')) {
+                return; // Let the button handle the click
+            }
+
+            // Otherwise, prevent scrolling and JUMP
             e.preventDefault();
             jump();
         }, {passive: false});
@@ -180,14 +193,13 @@
         // --- LOGIC LOOP ---
         function spawnEntity() {
             if (frame % 90 === 0) {
-                // 30% chance for Good Data, 70% for Bad Obstacle
                 if (Math.random() > 0.7) {
                     entities.push({
                         type: 'collectible',
                         x: canvas.width,
                         y: canvas.height - GROUND_HEIGHT - 60 - (Math.random() * 80), 
                         r: 15,
-                        color: '#00f260' // Green
+                        color: '#00f260'
                     });
                 } else {
                     let problem = PROBLEMS[Math.floor(Math.random() * PROBLEMS.length)];
@@ -200,7 +212,7 @@
                         height: h,
                         label: problem.label,
                         icon: problem.icon,
-                        color: '#ff4b4b' // Red
+                        color: '#ff4b4b'
                     });
                 }
             }
@@ -222,7 +234,7 @@
             if (isGameOver) return;
 
             frame++;
-            gameSpeed += 0.002; // Slowly accelerate
+            gameSpeed += 0.002; 
             bgOffset -= gameSpeed;
 
             // Physics
@@ -241,14 +253,12 @@
 
             spawnEntity();
 
-            // Update Entities (Move & Collide)
+            // Update Entities
             for (let i = entities.length - 1; i >= 0; i--) {
                 let e = entities[i];
                 e.x -= gameSpeed;
 
                 if (e.type === 'obstacle') {
-                    // Collision with Obstacle
-                    // (Hitbox is slightly smaller than visual box to be fair to player)
                     if (
                         player.x + 10 < e.x + e.width &&
                         player.x + player.width - 10 > e.x &&
@@ -261,7 +271,6 @@
                         ui.style.display = 'block';
                     }
                 } else if (e.type === 'collectible') {
-                    // Collision with Data Orb
                     let dx = (player.x + player.width/2) - e.x;
                     let dy = (player.y + player.height/2) - e.y;
                     let dist = Math.sqrt(dx*dx + dy*dy);
@@ -274,7 +283,6 @@
                     }
                 }
 
-                // Cleanup off-screen entities
                 if (e.x < -100) {
                     if(e.type === 'obstacle') score += 10; 
                     entities.splice(i, 1);
@@ -292,14 +300,14 @@
 
         // --- DRAW LOOP ---
         function draw() {
-            // 1. Draw Background (Dark Gradient)
+            // Background
             let grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
             grad.addColorStop(0, '#050510');
             grad.addColorStop(1, '#101025');
             ctx.fillStyle = grad;
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // 2. Draw Cyber Grid
+            // Grid
             ctx.strokeStyle = 'rgba(79, 172, 254, 0.15)';
             ctx.lineWidth = 2;
             ctx.beginPath();
@@ -310,7 +318,7 @@
             }
             ctx.stroke();
 
-            // 3. Draw Ground Line
+            // Ground Line
             ctx.shadowBlur = 15;
             ctx.shadowColor = 'white';
             ctx.strokeStyle = 'white';
@@ -321,38 +329,37 @@
             ctx.stroke();
             ctx.shadowBlur = 0;
 
-            // 4. Draw Player (The Cream/Black Logo)
+            // Draw Player
             if (logoImg.complete) {
                 ctx.shadowBlur = 25;
-                ctx.shadowColor = '#F5F5DC'; // Cream Glow
+                ctx.shadowColor = '#F5F5DC'; 
                 ctx.drawImage(logoImg, player.x, player.y, player.width, player.height);
                 ctx.shadowBlur = 0;
             } else {
-                // Fallback if image fails
                 ctx.fillStyle = '#F5F5DC';
                 ctx.fillRect(player.x, player.y, player.width, player.height);
             }
 
-            // 5. Draw Entities (Obstacles & Orbs)
+            // Draw Entities
             entities.forEach(e => {
                 if (e.type === 'obstacle') {
-                    // Draw Hitbox Outline
                     ctx.strokeStyle = 'rgba(255, 75, 75, 0.5)';
                     ctx.lineWidth = 2;
                     ctx.strokeRect(e.x, e.y, e.width, e.height);
 
-                    // Draw Emoji Icon
-                    ctx.font = '40px Arial'; 
+                    // --- EMOJI FIX ---
+                    // Use sans-serif to ensure mobile devices use their native emoji font
+                    ctx.font = '40px sans-serif'; 
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
-                    ctx.fillText(e.icon, e.x + e.width/2, e.y + e.height/2);
+                    // Add a slight offset to ensure it centers in the box
+                    ctx.fillText(e.icon, e.x + e.width/2, e.y + e.height/2 + 2);
 
-                    // Draw Label Text
+                    // Draw Label
                     ctx.fillStyle = 'white';
                     ctx.font = '10px JetBrains Mono';
                     ctx.fillText(e.label, e.x + e.width/2, e.y - 15);
                 } else {
-                    // Draw Data Orb
                     ctx.fillStyle = e.color;
                     ctx.shadowBlur = 15;
                     ctx.shadowColor = '#00f260';
@@ -369,7 +376,7 @@
                 }
             });
 
-            // 6. Draw Particles
+            // Particles
             particles.forEach(p => {
                 ctx.fillStyle = p.color;
                 ctx.globalAlpha = p.life;
@@ -379,7 +386,7 @@
                 ctx.globalAlpha = 1.0;
             });
 
-            // 7. Draw HUD (Score)
+            // HUD
             ctx.fillStyle = 'white';
             ctx.font = 'bold 20px JetBrains Mono';
             ctx.textAlign = 'left';
@@ -391,12 +398,19 @@
 
         // --- GAME ENGINE START ---
         function resetGame() {
+            // Force close UI
+            ui.style.display = 'none';
+            
             isGameOver = false;
             entities = [];
             particles = [];
             score = 0;
             gameSpeed = 6;
-            ui.style.display = 'none';
+            
+            // Reset player
+            player.y = canvas.height - GROUND_HEIGHT - player.height;
+            player.velocity_y = 0;
+            
             gameLoop();
         }
 
@@ -408,7 +422,7 @@
             }
         }
 
-        gameLoop(); // Kickoff
+        gameLoop(); 
     </script>
 </body>
 </html>
