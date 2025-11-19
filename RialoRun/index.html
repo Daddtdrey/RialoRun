@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rialo Run: The Direct Link</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@800&display=swap');
+
+        body { 
+            margin: 0; 
+            padding: 0; 
+            background-color: #050510; 
+            overflow: hidden; 
+            font-family: 'JetBrains Mono', monospace; 
+            touch-action: none; /* Critical for mobile */
+        }
+        canvas { display: block; }
+        
+        /* UI OVERLAY */
+        #ui {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: white;
+            display: none; /* Hidden by default */
+            z-index: 10;
+            background: rgba(5, 5, 16, 0.95);
+            padding: 2.5rem;
+            border: 2px solid #F5F5DC; /* Cream Border */
+            border-radius: 16px;
+            box-shadow: 0 0 60px rgba(245, 245, 220, 0.3);
+            min-width: 300px;
+        }
+        h1 { 
+            font-size: 32px; 
+            margin: 0 0 15px 0; 
+            color: #ff4b4b; /* Red for Danger/Error */
+            text-transform: uppercase;
+            letter-spacing: -1px;
+            text-shadow: 0 0 10px rgba(255, 75, 75, 0.5);
+        }
+        p { font-size: 16px; color: #a0a0b0; margin-bottom: 10px; line-height: 1.5; }
+        
+        .score-big {
+            font-size: 40px;
+            color: #F5F5DC; /* Cream Score Text */
+            display: block;
+            margin: 10px 0 20px 0;
+            font-weight: bold;
+        }
+
+        button {
+            background: #F5F5DC; /* Cream Button */
+            color: #000;
+            border: none;
+            padding: 12px 30px;
+            font-family: inherit;
+            font-weight: 900;
+            font-size: 18px;
+            cursor: pointer;
+            text-transform: uppercase;
+            border-radius: 4px;
+            transition: transform 0.1s;
+        }
+        button:hover { background: #fff; transform: scale(1.05); }
+
+        #start-hint {
+            position: absolute;
+            bottom: 15%;
+            width: 100%;
+            text-align: center;
+            color: #F5F5DC;
+            font-size: 14px;
+            opacity: 0.7;
+            pointer-events: none;
+            animation: float 2s infinite ease-in-out;
+        }
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- UI Layer -->
+    <div id="ui">
+        <h1>Connection Lost</h1>
+        <p id="death-reason">System Failure</p>
+        <p>Rialo Points Collected:</p>
+        <span id="final-score" class="score-big">0</span>
+        <button onclick="resetGame()">Reboot Protocol</button>
+    </div>
+
+    <div id="start-hint">TAP SCREEN or PRESS SPACE to JUMP</div>
+
+    <!-- The Game Stage -->
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const ui = document.getElementById('ui');
+        const deathReason = document.getElementById('death-reason');
+        const finalScore = document.getElementById('final-score');
+
+        // 1. Resize Logic
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // --- ASSETS: THE CREAM & BLACK LOGO ---
+        // Background: #F5F5DC (Cream)
+        // Letter R: #000000 (Black)
+        const logoImg = new Image();
+        logoImg.src = "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='100' fill='%23F5F5DC'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='sans-serif' font-weight='900' font-size='350' fill='%23000000'%3ER%3C/text%3E%3C/svg%3E";
+
+        // --- CONFIG: THE VILLAINS ---
+        const PROBLEMS = [
+            { label: "ORACLE LAG", icon: "⏳" },
+            { label: "BRIDGE HACK", icon: "🌉" },
+            { label: "GAS SPIKE", icon: "⛽" },
+            { label: "MIDDLEMAN", icon: "👔" },
+            { label: "WEB2 WALL", icon: "🧱" },
+            { label: "OLD CHAIN", icon: "🦖" }
+        ];
+        
+        // --- GAME STATE ---
+        let isGameOver = false;
+        let score = 0;
+        let bgOffset = 0;
+        let frame = 0;
+        let gameSpeed = 6;
+
+        let player = {
+            x: 100, 
+            y: 100, 
+            width: 50, 
+            height: 50,
+            velocity_y: 0, 
+            color: '#F5F5DC', // Cream fallback color
+            isGrounded: false
+        };
+
+        let entities = []; 
+        let particles = [];
+
+        const GRAVITY = 0.8;
+        const JUMP_FORCE = -16; 
+        const GROUND_HEIGHT = 100;
+
+        // --- CONTROLS ---
+        function jump() {
+            if (isGameOver) return;
+            document.getElementById('start-hint').style.display = 'none';
+            
+            if (player.isGrounded) {
+                player.velocity_y = JUMP_FORCE;
+                player.isGrounded = false;
+                // Spawn Cream-colored dust
+                spawnParticles(player.x + player.width/2, player.y + player.height, '#F5F5DC', 5);
+            }
+        }
+
+        window.addEventListener('keydown', e => {
+            if (e.code === 'Space' || e.code === 'ArrowUp') jump();
+        });
+        window.addEventListener('touchstart', e => {
+            e.preventDefault();
+            jump();
+        }, {passive: false});
+
+        // --- LOGIC LOOP ---
+        function spawnEntity() {
+            if (frame % 90 === 0) {
+                // 30% chance for Good Data, 70% for Bad Obstacle
+                if (Math.random() > 0.7) {
+                    entities.push({
+                        type: 'collectible',
+                        x: canvas.width,
+                        y: canvas.height - GROUND_HEIGHT - 60 - (Math.random() * 80), 
+                        r: 15,
+                        color: '#00f260' // Green
+                    });
+                } else {
+                    let problem = PROBLEMS[Math.floor(Math.random() * PROBLEMS.length)];
+                    let h = 70; 
+                    entities.push({
+                        type: 'obstacle',
+                        x: canvas.width,
+                        y: canvas.height - GROUND_HEIGHT - h,
+                        width: 50,
+                        height: h,
+                        label: problem.label,
+                        icon: problem.icon,
+                        color: '#ff4b4b' // Red
+                    });
+                }
+            }
+        }
+
+        function spawnParticles(x, y, color, count) {
+            for(let i=0; i<count; i++) {
+                particles.push({
+                    x: x, y: y,
+                    vx: (Math.random() - 0.5) * 10,
+                    vy: (Math.random() - 0.5) * 10,
+                    life: 1.0,
+                    color: color
+                });
+            }
+        }
+
+        function update() {
+            if (isGameOver) return;
+
+            frame++;
+            gameSpeed += 0.002; // Slowly accelerate
+            bgOffset -= gameSpeed;
+
+            // Physics
+            player.velocity_y += GRAVITY;
+            player.y += player.velocity_y;
+
+            // Ground Physics
+            let groundY = canvas.height - GROUND_HEIGHT;
+            if (player.y + player.height > groundY) {
+                player.y = groundY - player.height;
+                player.velocity_y = 0;
+                player.isGrounded = true;
+            } else {
+                player.isGrounded = false;
+            }
+
+            spawnEntity();
+
+            // Update Entities (Move & Collide)
+            for (let i = entities.length - 1; i >= 0; i--) {
+                let e = entities[i];
+                e.x -= gameSpeed;
+
+                if (e.type === 'obstacle') {
+                    // Collision with Obstacle
+                    // (Hitbox is slightly smaller than visual box to be fair to player)
+                    if (
+                        player.x + 10 < e.x + e.width &&
+                        player.x + player.width - 10 > e.x &&
+                        player.y + 10 < e.y + e.height &&
+                        player.y + player.height > e.y
+                    ) {
+                        isGameOver = true;
+                        deathReason.innerText = "BLOCKED BY: " + e.label + " " + e.icon;
+                        finalScore.innerText = score;
+                        ui.style.display = 'block';
+                    }
+                } else if (e.type === 'collectible') {
+                    // Collision with Data Orb
+                    let dx = (player.x + player.width/2) - e.x;
+                    let dy = (player.y + player.height/2) - e.y;
+                    let dist = Math.sqrt(dx*dx + dy*dy);
+
+                    if (dist < e.r + 30) { 
+                        score += 50;
+                        spawnParticles(e.x, e.y, '#00f260', 10);
+                        entities.splice(i, 1);
+                        continue;
+                    }
+                }
+
+                // Cleanup off-screen entities
+                if (e.x < -100) {
+                    if(e.type === 'obstacle') score += 10; 
+                    entities.splice(i, 1);
+                }
+            }
+
+            // Update Particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                particles[i].x += particles[i].vx;
+                particles[i].y += particles[i].vy;
+                particles[i].life -= 0.05;
+                if(particles[i].life <= 0) particles.splice(i, 1);
+            }
+        }
+
+        // --- DRAW LOOP ---
+        function draw() {
+            // 1. Draw Background (Dark Gradient)
+            let grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            grad.addColorStop(0, '#050510');
+            grad.addColorStop(1, '#101025');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 2. Draw Cyber Grid
+            ctx.strokeStyle = 'rgba(79, 172, 254, 0.15)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            let startX = bgOffset % 60;
+            for (let x = startX; x < canvas.width; x += 60) {
+                ctx.moveTo(x, canvas.height - GROUND_HEIGHT);
+                ctx.lineTo(x - 60, canvas.height);
+            }
+            ctx.stroke();
+
+            // 3. Draw Ground Line
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = 'white';
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(0, canvas.height - GROUND_HEIGHT);
+            ctx.lineTo(canvas.width, canvas.height - GROUND_HEIGHT);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+
+            // 4. Draw Player (The Cream/Black Logo)
+            if (logoImg.complete) {
+                ctx.shadowBlur = 25;
+                ctx.shadowColor = '#F5F5DC'; // Cream Glow
+                ctx.drawImage(logoImg, player.x, player.y, player.width, player.height);
+                ctx.shadowBlur = 0;
+            } else {
+                // Fallback if image fails
+                ctx.fillStyle = '#F5F5DC';
+                ctx.fillRect(player.x, player.y, player.width, player.height);
+            }
+
+            // 5. Draw Entities (Obstacles & Orbs)
+            entities.forEach(e => {
+                if (e.type === 'obstacle') {
+                    // Draw Hitbox Outline
+                    ctx.strokeStyle = 'rgba(255, 75, 75, 0.5)';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(e.x, e.y, e.width, e.height);
+
+                    // Draw Emoji Icon
+                    ctx.font = '40px Arial'; 
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(e.icon, e.x + e.width/2, e.y + e.height/2);
+
+                    // Draw Label Text
+                    ctx.fillStyle = 'white';
+                    ctx.font = '10px JetBrains Mono';
+                    ctx.fillText(e.label, e.x + e.width/2, e.y - 15);
+                } else {
+                    // Draw Data Orb
+                    ctx.fillStyle = e.color;
+                    ctx.shadowBlur = 15;
+                    ctx.shadowColor = '#00f260';
+                    ctx.beginPath();
+                    ctx.arc(e.x, e.y, e.r, 0, Math.PI*2);
+                    ctx.fill();
+                    ctx.shadowBlur = 0;
+                    
+                    ctx.fillStyle = '#000';
+                    ctx.font = '20px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('+', e.x, e.y);
+                }
+            });
+
+            // 6. Draw Particles
+            particles.forEach(p => {
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = p.life;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 3, 0, Math.PI*2);
+                ctx.fill();
+                ctx.globalAlpha = 1.0;
+            });
+
+            // 7. Draw HUD (Score)
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 20px JetBrains Mono';
+            ctx.textAlign = 'left';
+            ctx.shadowColor = 'black';
+            ctx.shadowBlur = 4;
+            ctx.fillText("RIALO POINTS: " + score, 20, 40);
+            ctx.shadowBlur = 0;
+        }
+
+        // --- GAME ENGINE START ---
+        function resetGame() {
+            isGameOver = false;
+            entities = [];
+            particles = [];
+            score = 0;
+            gameSpeed = 6;
+            ui.style.display = 'none';
+            gameLoop();
+        }
+
+        function gameLoop() {
+            if (!isGameOver) {
+                update();
+                draw();
+                requestAnimationFrame(gameLoop);
+            }
+        }
+
+        gameLoop(); // Kickoff
+    </script>
+</body>
+</html>
